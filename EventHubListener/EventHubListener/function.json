@@ -1,0 +1,14 @@
+{
+  "scriptFile": "__init__.py",
+  "bindings": [
+    {
+      "type": "eventHubTrigger",
+      "name": "events",
+      "direction": "in",
+      "eventHubName": "test",
+      "connection": "ServiceApp-event-devtest/test",
+      "cardinality": "many",
+      "consumerGroup": "$Default"
+    }
+  ]
+}
