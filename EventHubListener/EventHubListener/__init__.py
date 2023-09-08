@@ -112,6 +112,7 @@ import pyodbc
 # from dotenv import load_dotenv
 from O365 import Account, FileSystemTokenBackend
 
+
 class DatabaseManager:
     def __init__(self, db_user_name, db_server_name, db_database, db_database_psw):
         self.db_user_name = db_user_name
@@ -123,14 +124,30 @@ class DatabaseManager:
     def _create_engine(self):
         authentication = 'ActiveDirectoryInteractive'
         driver = '{ODBC Driver 18 for SQL Server}'
-        db_odbc_str = (f'Driver={driver};Server=tcp:serverbdtesthub.database.windows.net,1433;'
-                       f'Database=bdtest;Uid=martinaj;Pwd={self.db_database_psw};'
-                       f'Encrypt=yes;TrustServerCertificate=no;Connection Timeout=30;')
+        # db_odbc_str = (f'Driver={driver};Server=tcp:serverbdtesthub.database.windows.net,1433;'
+        #                f'Database=bdtest;Uid=martinaj;Pwd={self.db_database_psw};'
+        #                f'Encrypt=yes;TrustServerCertificate=no;Connection Timeout=30;')
+        #
+        # db_odbc_str = f'DRIVER={driver};SERVER={db_server_name};PORT=1433;UID={db_user_name};' \
+        #               f'DATABASE={db_database};' \
+        #               f'AUTHENTICATION={authentication}'
+
+        db_odbc_str = f'Driver={driver};Server={self.db_server_name};PORT=1433;Uid={self.db_user_name};' \
+                      f'Database={self.db_database};' \
+                      f'Authentication={authentication}'
         db_connect_str = 'mssql+pyodbc:///?odbc_connect=' + urllib.parse.quote_plus(db_odbc_str)
         return create_engine(db_connect_str)
 
     def get_data_by_inject_id(self, inject_id):
-        query = text(f'SELECT * FROM[dbo].[Estudiantes] where ID = {inject_id}')
+        # query = text(f'SELECT * FROM[dbo].[Estudiantes] where ID = {inject_id}')
+        query = text(f'SELECT DISTINCT i.Id, i.EventTitle, t.Name AS [Team], '
+                     f'r.Name AS [Role], m.Email, m.FirstName, m.LastName '
+                     f'FROM Inject i '
+                     f'JOIN InjectTeam it ON it.InjectID = i.Id '
+                     f'JOIN TeamRole tr ON tr.TeamId = it.TeamId '
+                     f'JOIN Team t ON t.Id = it.TeamId JOIN Role r ON r.Id = tr.RoleId '
+                     f'JOIN Member m ON m.Id = tr.MemberId WHERE i.Id = {inject_id}')
+
         with self.engine.connect() as conn:
             try:
                 dataframe = pd.read_sql(query, conn)
@@ -141,8 +158,8 @@ class DatabaseManager:
 
 
 class EmailManager:
-    def __init__(self):
-        self.credentials = ('client_id', 'client_secret')  # Se pueden obtener desde variables de entorno
+    def __init__(self, mail_client_id, mail_client_secret):
+        self.credentials = (mail_client_id, mail_client_secret)
         self.token_backend = FileSystemTokenBackend(token_path='.', token_filename='o365_token.txt')
         self.account = Account(self.credentials, token_backend=self.token_backend)
 
@@ -184,15 +201,15 @@ class EventHandler:
 
             data_frame_result_set = self.db_manager.get_data_by_inject_id(inject_id)
 
-            if "email" not in data_frame_result_set.columns:
+            if "Email" not in data_frame_result_set.columns:
                 return
 
             for _, row in data_frame_result_set.iterrows():
-                emails = row["email"]
+                emails = row["Email"]
                 parsed_json_mails = json.loads(emails)
                 for email in parsed_json_mails['mail']:
                     logging.info('Python results: %s', email)
-                    self.email_manager.send_email(email, "subject", "body")
+                    # self.email_manager.send_email(email, "subject", "body")
 
         except Exception as e:
             logging.info('Error: %s', e)
@@ -203,9 +220,11 @@ def main(events: List[func.EventHubEvent]):
     db_server_name = os.environ.get("DB_SERVERNAME")
     db_database = os.environ.get("DB_DATABASE")
     db_database_psw = os.environ.get("DB_PSW")
+    mail_client_id = os.environ.get("MAIL_CLIENT_ID")
+    mail_client_secret = os.environ.get("MAIL_CLIENT_SECRET")
 
     db_manager = DatabaseManager(db_user_name, db_server_name, db_database, db_database_psw)
-    email_manager = EmailManager()
+    email_manager = EmailManager(mail_client_id, mail_client_secret)
     event_handler = EventHandler(db_manager, email_manager)
 
     for event in events:
